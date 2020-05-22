@@ -3,8 +3,8 @@ import sys
 import os
 path = sys.path[0]
 path = path[0:-5] + 'third-party/DaSiamRPN/'
-print(path)
 sys.path.append(path)
+
 import rospy
 import cv2
 import torch
@@ -16,6 +16,7 @@ from net import SiamRPNvot
 from run_SiamRPN import SiamRPN_init, SiamRPN_track
 from utils import get_axis_aligned_bbox, cxy_wh_2_rect
 from idmanage import readid
+import time
 '''
 def draw_circle(event, x, y, flags, param):
     global x1, y1, x2, y2, drawing, init, flag, iamge
@@ -79,6 +80,7 @@ def draw_circle(event, x, y, flags, param):
                 x1, x2, y1, y2 = -1, -1, -1, -1
         if drawing is True:
             x2, y2 = x, y
+            
             cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
   
         
@@ -109,7 +111,7 @@ def showImage():
     x1, x2, y1, y2 = -1, -1, -1, -1
     flag_lose = False
     count_lose = 0
-    
+
     print('laoding model...........')
     net = SiamRPNvot()
     net.load_state_dict(torch.load(path + 'SiamRPNVOT.model'))
@@ -124,12 +126,19 @@ def showImage():
     pub = rospy.Publisher('/vision/target', Pose, queue_size=10) 
     cv2.namedWindow('image')
     cv2.setMouseCallback('image', draw_circle)
-    rate = rospy.Rate(10)
+    rate = rospy.Rate(30)
+    i = 1
+    t = time.time()
+    fps = 0
     while not rospy.is_shutdown():
       
         if getim:
+            t1 = time.time()
+            idd = readid(image)
+            
             pose = Pose()
             pose.position.z = 0
+            
             if start is False and init is True:
                 target_pos = np.array([int((x1+x2)/2), int((y1+y2)/2)])
                 target_sz = np.array([int(x2-x1), int(y2-y1)])
@@ -137,8 +146,10 @@ def showImage():
                 start = True
                 flag_lose = False
                 continue
+                
             if start is True:
-                state = SiamRPN_track(state, image)  # track
+            
+                state = SiamRPN_track(state, image)  # track              
                 res = cxy_wh_2_rect(state['target_pos'], state['target_sz'])
                 res = [int(l) for l in res]
                 cv2.rectangle(image, (res[0], res[1]), (res[0] + res[2], res[1] + res[3]), (0, 255, 255), 2)
@@ -152,12 +163,14 @@ def showImage():
                     count_lose = 0
                 if count_lose > 4:
                     flag_lose = True
+                    
             if flag_lose is True:
-                cv2.putText(image, 'target is lost!', (200,200), cv2.FONT_HERSHEY_SIMPLEX , 2, (255,0,0), 3)
-                pose.position.z = -1
-            if drawing is True:
+                    cv2.putText(image, 'target is lost!', (200,200), cv2.FONT_HERSHEY_SIMPLEX , 2, (255,0,0), 3)
+                    pose.position.z = -1
+                   
+            if drawing is True:              
                 cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            idd = readid(image)
+            
             cv2.putText(image, '#'+str(idd), (30,30), cv2.FONT_HERSHEY_SIMPLEX , 0.5, (0, 255, 255), 1)
             cx = int(image.shape[1]/2)
             cy = int(image.shape[0]/2)
@@ -165,11 +178,22 @@ def showImage():
             cv2.line(image,(cx, cy-20), (cx, cy+20), (255, 255, 255), 2)
             
             pub.publish(pose)
+            
+            if start is True:    
+               
+                i = i + 1
+            if i > 5:
+                i = 1
+                fps = 5 / (time.time()-t)
+                t = time.time()
+            cv2.putText(image, 'fps='+str(fps), (200,30), cv2.FONT_HERSHEY_SIMPLEX , 0.5, (0, 255, 255), 1)
+            
             cv2.imshow('image', image)
             cv2.waitKey(1)
+            getim = False
 
         rate.sleep()
-
+    
 if __name__ == '__main__':
     showImage()
 
